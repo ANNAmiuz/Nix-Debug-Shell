@@ -61,24 +61,36 @@ int main(int argc, const char **argv)
     fclose(env_vars_fp);
 
     // usernamespace setting
+    int uid = getuid();
+    int gid = getgid();
     int userns_ret = unshare(CLONE_NEWUSER);
     if (userns_ret != 0)
+    {
         perror("failure in usernamespace unshare");
+        exit(1);
+    }
     // write to /proc/self/uid_map and /proc/self/gid_map
-    FILE *uid_map_fp = fopen("/proc/self/uid_map", "r+");
+    FILE *uid_map_fp = fopen("/proc/self/uid_map", "w+");
     if (uid_map_fp == NULL)
     {
         perror("uid_map file open failure");
         exit(1);
     }
-    FILE *gid_map_fp = fopen("/proc/self/gid_map", "r+");
+    FILE *gid_map_fp = fopen("/proc/self/gid_map", "w+");
     if (gid_map_fp == NULL)
     {
         perror("gid_map file open failure");
         exit(1);
     }
-    // fputs("1000 0 4294967295", uid_map_fp);
-    // fputs("100 0 4294967295", gid_map_fp);
+    FILE * setg_fp = fopen("/proc/self/setgroups", "w+");
+    if (setg_fp == NULL)
+    {
+        perror("setgroups file open failure");
+        exit(1);
+    }
+    fprintf(setg_fp, "deny");
+    fprintf(uid_map_fp, "1000 %d 1", uid);
+    fprintf(gid_map_fp, "100 %d 1", gid);
     fclose(uid_map_fp);
     fclose(gid_map_fp);
 
@@ -91,12 +103,6 @@ int main(int argc, const char **argv)
     for (int i = 0; i < argc - 2; i++)
         exec_argv[4 + i] = argv[2 + i];
     exec_argv[2 + argc] = (char *)0;
-
-    // debug
-    // char* exec_argv[] = {"/nix/store/a4yw1svqqk4d8lhwinn9xp847zz9gfma-bash-4.4-p23/bin/bash", "-c", "source /tmp/nix-build-hello.drv-0/env-vars; exec \"$@\"", "--", "cat", "/proc/$$/uid_map", (char*)0};
-    // for (int i = 0; i < argc + 2; i++)
-    //     printf("%s\n",exec_argv[i]);
-    // fflush( stdout );
 
     if (fork() == 0)
         execv(shell_path, exec_argv);
