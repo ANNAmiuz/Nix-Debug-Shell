@@ -60,16 +60,17 @@ int main(int argc, const char **argv)
     parse_env_vars_file(env_vars_fp, shell_path, match_pattern);
     fclose(env_vars_fp);
 
-    // usernamespace setting
+    // namespace setting: user, uts, net
     int uid = getuid();
     int gid = getgid();
-    int userns_ret = unshare(CLONE_NEWUSER);
+    int userns_ret = unshare(CLONE_NEWUSER | CLONE_NEWUTS | CLONE_NEWNET);
     if (userns_ret != 0)
     {
         perror("failure in usernamespace unshare");
         exit(1);
     }
     
+    /*-------------------------------usernamespace--------------------------------------*/
     // write deny to setgroups file
     FILE * setg_fp = fopen("/proc/self/setgroups", "w+");
     if (setg_fp == NULL)
@@ -99,6 +100,15 @@ int main(int argc, const char **argv)
     fclose(uid_map_fp);
     fclose(gid_map_fp);
 
+    /*--------------------------------utsnamespace--------------------------------------*/
+    char * hostname = "localhost";
+    sethostname(hostname, strlen(hostname));
+
+
+    /*--------------------------------netnamespace--------------------------------------*/
+
+
+
     // execute the basic command
     char *exec_argv[3 + argc];
     exec_argv[0] = shell_path;
@@ -109,8 +119,5 @@ int main(int argc, const char **argv)
         exec_argv[4 + i] = argv[2 + i];
     exec_argv[2 + argc] = (char *)0;
 
-    // if (fork() == 0)
     execv(shell_path, exec_argv);
-    // else
-    //     waitpid(-1, NULL, 0);
 }
