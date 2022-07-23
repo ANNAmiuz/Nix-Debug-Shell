@@ -4,6 +4,11 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
 
 // #define DEBUG
 #ifdef DEBUG
@@ -69,10 +74,10 @@ int main(int argc, const char **argv)
         perror("failure in usernamespace unshare");
         exit(1);
     }
-    
+
     /*-------------------------------usernamespace--------------------------------------*/
     // write deny to setgroups file
-    FILE * setg_fp = fopen("/proc/self/setgroups", "w+");
+    FILE *setg_fp = fopen("/proc/self/setgroups", "w+");
     if (setg_fp == NULL)
     {
         perror("setgroups file open failure");
@@ -94,20 +99,26 @@ int main(int argc, const char **argv)
         perror("gid_map file open failure");
         exit(1);
     }
-    
+
     fprintf(uid_map_fp, "1000 %d 1", uid);
     fprintf(gid_map_fp, "100 %d 1", gid);
     fclose(uid_map_fp);
     fclose(gid_map_fp);
 
     /*--------------------------------utsnamespace--------------------------------------*/
-    char * hostname = "localhost";
+    char *hostname = "localhost";
     sethostname(hostname, strlen(hostname));
 
-
     /*--------------------------------netnamespace--------------------------------------*/
-
-
+    int fd = (socket(PF_INET, SOCK_DGRAM, IPPROTO_IP));
+    struct ifreq ifr;
+    strcpy(ifr.ifr_name, "lo");
+    ifr.ifr_flags = IFF_UP | IFF_LOOPBACK | IFF_RUNNING;
+    if (ioctl(fd, SIOCSIFFLAGS, &ifr) == -1)
+    {
+        perror("Lo set flag failure");
+        exit(1);
+    }
 
     // execute the basic command
     char *exec_argv[3 + argc];
