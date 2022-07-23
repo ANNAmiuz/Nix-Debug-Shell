@@ -9,8 +9,7 @@ RUSTFLAGS ?= -g
 
 # this target should build all executables for all tests
 all:
-	@echo "Please set a concrete build command here"
-	false
+	$(CC) $(CFLAGS) -o nix-build-shell nix-build-shell.c
 
 # C example:
 #all:
