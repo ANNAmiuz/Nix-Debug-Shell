@@ -69,6 +69,17 @@ int main(int argc, const char **argv)
         perror("failure in usernamespace unshare");
         exit(1);
     }
+    
+    // write deny to setgroups file
+    FILE * setg_fp = fopen("/proc/self/setgroups", "w+");
+    if (setg_fp == NULL)
+    {
+        perror("setgroups file open failure");
+        exit(1);
+    }
+    fprintf(setg_fp, "deny");
+    fclose(setg_fp);
+
     // write to /proc/self/uid_map and /proc/self/gid_map
     FILE *uid_map_fp = fopen("/proc/self/uid_map", "w+");
     if (uid_map_fp == NULL)
@@ -82,13 +93,7 @@ int main(int argc, const char **argv)
         perror("gid_map file open failure");
         exit(1);
     }
-    FILE * setg_fp = fopen("/proc/self/setgroups", "w+");
-    if (setg_fp == NULL)
-    {
-        perror("setgroups file open failure");
-        exit(1);
-    }
-    fprintf(setg_fp, "deny");
+    
     fprintf(uid_map_fp, "1000 %d 1", uid);
     fprintf(gid_map_fp, "100 %d 1", gid);
     fclose(uid_map_fp);
@@ -104,8 +109,8 @@ int main(int argc, const char **argv)
         exec_argv[4 + i] = argv[2 + i];
     exec_argv[2 + argc] = (char *)0;
 
-    if (fork() == 0)
-        execv(shell_path, exec_argv);
-    else
-        waitpid(-1, NULL, 0);
+    // if (fork() == 0)
+    execv(shell_path, exec_argv);
+    // else
+    //     waitpid(-1, NULL, 0);
 }
