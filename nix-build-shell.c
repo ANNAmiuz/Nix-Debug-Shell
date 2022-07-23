@@ -91,12 +91,15 @@ int main(int argc, const char **argv)
     for (int i = 0; i < argc - 2; i++)
         exec_argv[4 + i] = argv[2 + i];
     exec_argv[2 + argc] = (char *)0;
-    
+
     // debug
     // char* exec_argv[] = {"/nix/store/a4yw1svqqk4d8lhwinn9xp847zz9gfma-bash-4.4-p23/bin/bash", "-c", "source /tmp/nix-build-hello.drv-0/env-vars; exec \"$@\"", "--", "cat", "/proc/$$/uid_map", (char*)0};
     // for (int i = 0; i < argc + 2; i++)
     //     printf("%s\n",exec_argv[i]);
     // fflush( stdout );
 
-    execv(shell_path, exec_argv);
+    if (fork() == 0)
+        execv(shell_path, exec_argv);
+    else
+        waitpid(-1, NULL, 0);
 }
