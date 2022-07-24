@@ -36,38 +36,12 @@ void err_report(bool condition, const char *errmsg)
     }
 }
 
-/*   ** Function return value meaning
- * -1 cannot open source file
- * -2 cannot open destination file
- * 0 Success
- */
-int File_Copy(char FileSource[], char FileDestination[])
-{
-    int c;
-    FILE *stream_R;
-    FILE *stream_W;
-
-    stream_R = fopen(FileSource, "r");
-    if (stream_R == NULL)
-        return -1;
-    stream_W = fopen(FileDestination, "w"); // create and write to file
-    if (stream_W == NULL)
-    {
-        fclose(stream_R);
-        return -2;
-    }
-    while ((c = fgetc(stream_R)) != EOF)
-        fputc(c, stream_W);
-    fclose(stream_R);
-    fclose(stream_W);
-
-    return 0;
-}
-
 void write_to_file(const char *path, const char *content)
 {
     FILE *fp = fopen(path, "w+");
+    err_report(fp == NULL, "files under /etc open failure");
     fprintf(fp, content);
+    fclose(fp);
     return;
 }
 
@@ -128,26 +102,68 @@ void mountns_prepare(const char *sandbox_root_path, const char *shell_path, cons
     mknod(target_path, S_IFREG | 0666, 0);
     mount_ret = mount(shell_path, target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
     err_report(mount_ret == -1, "mount /bin/sh failure");
-    
+
     /// etc
     get_abs_path_name(sandbox_root_path, "/etc", target_path);
     mkret = mkdir(target_path, 0700);
     err_report(mkret == -1, "mkdir /etc failure");
     get_abs_path_name(sandbox_root_path, "/etc/group", target_path);
-    mknod(target_path, S_IFREG | 0666, 0);
+    // mknod(target_path, S_IFREG | 0777, 0);
     write_to_file(target_path, "root:x:0:\nnixbld:!:100:\nnogroup:x:65534:\n");
     get_abs_path_name(sandbox_root_path, "/etc/passwd", target_path);
-    mknod(target_path, S_IFREG | 0666, 0);
+    // mknod(target_path, S_IFREG | 0777, 0);
     write_to_file(target_path, "root:x:0:0:Nix build user:/build:/noshell\nnixbld:x:1000:100:Nix build user:/build:/noshell\nnobody:x:65534:65534:Nobody:/:/noshell\n");
     get_abs_path_name(sandbox_root_path, "/etc/hosts", target_path);
-    mknod(target_path, S_IFREG | 0666, 0);
+    // mknod(target_path, S_IFREG | 0777, 0);
     write_to_file(target_path, "127.0.0.1 localhost\n::1 localhost\n");
 
     /// dev
     get_abs_path_name(sandbox_root_path, "/dev", target_path);
     mkret = mkdir(target_path, 0700);
     err_report(mkret == -1, "mkdir /dev failure");
-    mount_ret = mount("/dev", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+    // mount_ret = mount("/dev", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+    get_abs_path_name(sandbox_root_path, "/dev/full", target_path);
+    mknod(target_path, S_IFREG | 0666, 0);
+    mount_ret = mount("/dev/full", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+
+    get_abs_path_name(sandbox_root_path, "/dev/kvm", target_path);
+    mknod(target_path, S_IFREG | 0666, 0);
+    mount_ret = mount("/dev/kvm", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+
+    get_abs_path_name(sandbox_root_path, "/dev/null", target_path);
+    mknod(target_path, S_IFREG | 0666, 0);
+    mount_ret = mount("/dev/null", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+
+    get_abs_path_name(sandbox_root_path, "/dev/random", target_path);
+    mknod(target_path, S_IFREG | 0666, 0);
+    mount_ret = mount("/dev/random", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+
+    get_abs_path_name(sandbox_root_path, "/dev/tty", target_path);
+    mknod(target_path, S_IFREG | 0666, 0);
+    mount_ret = mount("/dev/tty", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+
+    get_abs_path_name(sandbox_root_path, "/dev/urandom", target_path);
+    mknod(target_path, S_IFREG | 0666, 0);
+    mount_ret = mount("/dev/urandom", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+
+    get_abs_path_name(sandbox_root_path, "/dev/zero", target_path);
+    mknod(target_path, S_IFREG | 0666, 0);
+    mount_ret = mount("/dev/zero", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+
+    get_abs_path_name(sandbox_root_path, "/dev/ptmx", target_path);
+    mknod(target_path, S_IFREG | 0666, 0);
+    mount_ret = mount("/dev/ptmx", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+
+    get_abs_path_name(sandbox_root_path, "/dev/pts", target_path);
+    // mknod(target_path, S_IFDIR | 0666, 0);
+    mkdir(target_path, 0700);
+    mount_ret = mount("/dev/pts", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+
+    get_abs_path_name(sandbox_root_path, "/dev/shm", target_path);
+    // mknod(target_path, S_IFDIR | 0666, 0);
+    mkdir(target_path, 0700);
+    mount_ret = mount("/dev/shm", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+
     get_abs_path_name(sandbox_root_path, "/dev/fd", target_path);
     symlink("/proc/self/fd", target_path);
     get_abs_path_name(sandbox_root_path, "/dev/stdin", target_path);
@@ -157,7 +173,7 @@ void mountns_prepare(const char *sandbox_root_path, const char *shell_path, cons
     get_abs_path_name(sandbox_root_path, "/dev/stderr", target_path);
     symlink("/proc/self/fd/2", target_path);
 
-    /// etc
+    /// tmp
     get_abs_path_name(sandbox_root_path, "/tmp", target_path);
     mkret = mkdir(target_path, 0777);
 
@@ -166,6 +182,7 @@ void mountns_prepare(const char *sandbox_root_path, const char *shell_path, cons
     mkret = mkdir(target_path, 0700);
     err_report(mkret == -1, "mkdir /proc failure");
     mount_ret = mount("/proc", target_path, "proc", MS_REC | MS_BIND, "");
+    // mount_ret = mount("proc", target_path, "proc", 0, "");
     err_report(mkret == -1, "mkdir /proc failure");
 }
 
