@@ -3,12 +3,16 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #include <unistd.h>
-#include <sys/ioctl.h>
 #include <net/if.h>
-#include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/mount.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
 
 // #define DEBUG
 #ifdef DEBUG
@@ -21,6 +25,41 @@
 #endif
 
 #define MAX_LINE 256
+
+/*   ** Function return value meaning
+ * -1 cannot open source file
+ * -2 cannot open destination file
+ * 0 Success
+ */
+int File_Copy(char FileSource[], char FileDestination[])
+{
+    int c;
+    FILE *stream_R;
+    FILE *stream_W;
+
+    stream_R = fopen(FileSource, "r");
+    if (stream_R == NULL)
+        return -1;
+    stream_W = fopen(FileDestination, "w"); // create and write to file
+    if (stream_W == NULL)
+    {
+        fclose(stream_R);
+        return -2;
+    }
+    while ((c = fgetc(stream_R)) != EOF)
+        fputc(c, stream_W);
+    fclose(stream_R);
+    fclose(stream_W);
+
+    return 0;
+}
+
+void write_to_file(const char *path, const char *content)
+{
+    FILE *fp = fopen(path, "w+");
+    fprintf(fp, content);
+    return;
+}
 
 void parse_env_vars_file(FILE *fp, char *shell_path, const char *match_pattern)
 {
@@ -39,6 +78,67 @@ void parse_env_vars_file(FILE *fp, char *shell_path, const char *match_pattern)
         }
     }
     return;
+}
+
+void get_path_name(const char *root_path, char *path_to_add, char *ret)
+{
+    memset(ret, 0, sizeof(char) * MAX_LINE);
+    strcpy(ret, root_path);
+    strcat(ret, path_to_add);
+    return;
+}
+
+// sandbox_root_path: a tmp dir as / in the sandbox env
+// shell_path: parsed from build_path/env-vars
+// build_path: 2nd argument passed to nix-build-shell program
+void mountns_prepare(const char *sandbox_root_path, const char *shell_path, const char *build_path)
+{
+    char target_path[MAX_LINE];
+    /// nix
+    get_path_name(sandbox_root_path, "/nix", target_path);
+    mkdir(target_path, 0700);
+    int mount_ret = mount("/nix", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+    /// build
+    get_path_name(sandbox_root_path, "/build", target_path);
+    mkdir(target_path, 0700);
+    mount(build_path, target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+    /// bin
+    get_path_name(sandbox_root_path, "/bin", target_path);
+    mkdir(target_path, 0700);
+    get_path_name(sandbox_root_path, "/bin/sh", target_path);
+    mknod(target_path, S_IFREG | 0666, 0);
+    mount(shell_path, target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+    /// etc
+    get_path_name(sandbox_root_path, "/etc", target_path);
+    mkdir(target_path, 0700);
+    get_path_name(sandbox_root_path, "/etc/group", target_path);
+    mknod(target_path, S_IFREG | 0666, 0);
+    write_to_file(target_path, "root:x:0:\nnixbld:!:100:\nnogroup:x:65534:\n");
+    get_path_name(sandbox_root_path, "/etc/passwd", target_path);
+    mknod(target_path, S_IFREG | 0666, 0);
+    write_to_file(target_path, "root:x:0:0:Nix build user:/build:/noshell\nnixbld:x:1000:100:Nix build user:/build:/noshell\nnobody:x:65534:65534:Nobody:/:/noshell\n");
+    get_path_name(sandbox_root_path, "/etc/hosts", target_path);
+    mknod(target_path, S_IFREG | 0666, 0);
+    write_to_file(target_path, "127.0.0.1 localhost\n::1 localhost\n");
+    /// dev
+    get_path_name(sandbox_root_path, "/dev", target_path);
+    mkdir(target_path, 0700);
+    mount_ret = mount("/dev", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+    get_path_name(sandbox_root_path, "/dev/fd", target_path);
+    symlink("/proc/self/fd", target_path);
+    get_path_name(sandbox_root_path, "/dev/stdin", target_path);
+    symlink("/proc/self/fd/0", target_path);
+    get_path_name(sandbox_root_path, "/dev/stdout", target_path);
+    symlink("/proc/self/fd/1", target_path);
+    get_path_name(sandbox_root_path, "/dev/stderr", target_path);
+    symlink("/proc/self/fd/2", target_path);
+    /// etc
+    get_path_name(sandbox_root_path, "/tmp", target_path);
+    mkdir(target_path, 0777);
+    /// proc
+    get_path_name(sandbox_root_path, "/proc", target_path);
+    mkdir(target_path, 0700);
+    mount("none", target_path, "proc", 0, "");
 }
 
 int main(int argc, const char **argv)
@@ -68,10 +168,10 @@ int main(int argc, const char **argv)
     // namespace setting: user, uts, net
     int uid = getuid();
     int gid = getgid();
-    int userns_ret = unshare(CLONE_NEWUSER | CLONE_NEWUTS | CLONE_NEWNET);
-    if (userns_ret != 0)
+    int ns_ret = unshare(CLONE_NEWUSER | CLONE_NEWUTS | CLONE_NEWNET | CLONE_NEWNS);
+    if (ns_ret != 0)
     {
-        perror("failure in usernamespace unshare");
+        perror("unshare failure");
         exit(1);
     }
 
@@ -120,11 +220,36 @@ int main(int argc, const char **argv)
         exit(1);
     }
 
-    // execute the basic command
+    /*--------------------------------mountnamespace--------------------------------------*/
+    // create tmp dir for sandbox env
+    char name[] = "/tmp/sandboxXXXXXX";
+    char *sandbox_root_path = mkdtemp(name);
+    if (sandbox_root_path == NULL)
+    {
+        perror("mkdtemp failure");
+        exit(1);
+    }
+    mountns_prepare(sandbox_root_path, shell_path, build_dir);
+    int chr_ret = chroot(sandbox_root_path);
+    if (chr_ret == -1)
+    {
+        perror("chroot failure");
+        exit(1);
+    }
+    int ch_dir_ret = chdir("/");
+    if (ch_dir_ret == -1)
+    {
+        perror("chdir failure");
+        exit(1);
+    }
+
+
+    /*--------------------------------execute the basic command--------------------------------------*/
     char *exec_argv[3 + argc];
     exec_argv[0] = shell_path;
     exec_argv[1] = "-c";
-    exec_argv[2] = "source /tmp/nix-build-hello.drv-0/env-vars; exec \"$@\""; // /build/env-vars after successful setup
+    // exec_argv[2] = "source /tmp/nix-build-hello.drv-3/env-vars; exec \"$@\""; // change to /build/env-vars after successful setup mountns
+    exec_argv[2] = "source /build/env-vars; exec \"$@\"";
     exec_argv[3] = "--";
     for (int i = 0; i < argc - 2; i++)
         exec_argv[4 + i] = argv[2 + i];
