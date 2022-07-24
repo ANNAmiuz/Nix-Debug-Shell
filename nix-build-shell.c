@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <net/if.h>
@@ -25,6 +26,15 @@
 #endif
 
 #define MAX_LINE 256
+
+void err_report(bool condition, const char *errmsg)
+{
+    if (condition)
+    {
+        perror(errmsg);
+        exit(EXIT_FAILURE);
+    }
+}
 
 /*   ** Function return value meaning
  * -1 cannot open source file
@@ -80,7 +90,7 @@ void parse_env_vars_file(FILE *fp, char *shell_path, const char *match_pattern)
     return;
 }
 
-void get_path_name(const char *root_path, char *path_to_add, char *ret)
+void get_abs_path_name(const char *root_path, char *path_to_add, char *ret)
 {
     memset(ret, 0, sizeof(char) * MAX_LINE);
     strcpy(ret, root_path);
@@ -94,51 +104,69 @@ void get_path_name(const char *root_path, char *path_to_add, char *ret)
 void mountns_prepare(const char *sandbox_root_path, const char *shell_path, const char *build_path)
 {
     char target_path[MAX_LINE];
+    int mount_ret, mkret;
+
     /// nix
-    get_path_name(sandbox_root_path, "/nix", target_path);
-    mkdir(target_path, 0700);
-    int mount_ret = mount("/nix", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+    get_abs_path_name(sandbox_root_path, "/nix", target_path);
+    mkret = mkdir(target_path, 0700);
+    err_report(mkret == -1, "mkdir /nix failure");
+    mount_ret = mount("/nix", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+    err_report(mount_ret == -1, "mount nix failure");
+
     /// build
-    get_path_name(sandbox_root_path, "/build", target_path);
-    mkdir(target_path, 0700);
-    mount(build_path, target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+    get_abs_path_name(sandbox_root_path, "/build", target_path);
+    mkret = mkdir(target_path, 0700);
+    err_report(mkret == -1, "mkdir /build failure");
+    mount_ret = mount(build_path, target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+    err_report(mount == -1, "mount /build failure");
+
     /// bin
-    get_path_name(sandbox_root_path, "/bin", target_path);
-    mkdir(target_path, 0700);
-    get_path_name(sandbox_root_path, "/bin/sh", target_path);
+    get_abs_path_name(sandbox_root_path, "/bin", target_path);
+    mkret = mkdir(target_path, 0700);
+    err_report(mkret == -1, "mkdir /bin failure");
+    get_abs_path_name(sandbox_root_path, "/bin/sh", target_path);
     mknod(target_path, S_IFREG | 0666, 0);
-    mount(shell_path, target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+    mount_ret = mount(shell_path, target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
+    err_report(mount_ret == -1, "mount /bin/sh failure");
+    
     /// etc
-    get_path_name(sandbox_root_path, "/etc", target_path);
-    mkdir(target_path, 0700);
-    get_path_name(sandbox_root_path, "/etc/group", target_path);
+    get_abs_path_name(sandbox_root_path, "/etc", target_path);
+    mkret = mkdir(target_path, 0700);
+    err_report(mkret == -1, "mkdir /etc failure");
+    get_abs_path_name(sandbox_root_path, "/etc/group", target_path);
     mknod(target_path, S_IFREG | 0666, 0);
     write_to_file(target_path, "root:x:0:\nnixbld:!:100:\nnogroup:x:65534:\n");
-    get_path_name(sandbox_root_path, "/etc/passwd", target_path);
+    get_abs_path_name(sandbox_root_path, "/etc/passwd", target_path);
     mknod(target_path, S_IFREG | 0666, 0);
     write_to_file(target_path, "root:x:0:0:Nix build user:/build:/noshell\nnixbld:x:1000:100:Nix build user:/build:/noshell\nnobody:x:65534:65534:Nobody:/:/noshell\n");
-    get_path_name(sandbox_root_path, "/etc/hosts", target_path);
+    get_abs_path_name(sandbox_root_path, "/etc/hosts", target_path);
     mknod(target_path, S_IFREG | 0666, 0);
     write_to_file(target_path, "127.0.0.1 localhost\n::1 localhost\n");
+
     /// dev
-    get_path_name(sandbox_root_path, "/dev", target_path);
-    mkdir(target_path, 0700);
+    get_abs_path_name(sandbox_root_path, "/dev", target_path);
+    mkret = mkdir(target_path, 0700);
+    err_report(mkret == -1, "mkdir /dev failure");
     mount_ret = mount("/dev", target_path, 0, MS_REC | MS_PRIVATE | MS_BIND, NULL);
-    get_path_name(sandbox_root_path, "/dev/fd", target_path);
+    get_abs_path_name(sandbox_root_path, "/dev/fd", target_path);
     symlink("/proc/self/fd", target_path);
-    get_path_name(sandbox_root_path, "/dev/stdin", target_path);
+    get_abs_path_name(sandbox_root_path, "/dev/stdin", target_path);
     symlink("/proc/self/fd/0", target_path);
-    get_path_name(sandbox_root_path, "/dev/stdout", target_path);
+    get_abs_path_name(sandbox_root_path, "/dev/stdout", target_path);
     symlink("/proc/self/fd/1", target_path);
-    get_path_name(sandbox_root_path, "/dev/stderr", target_path);
+    get_abs_path_name(sandbox_root_path, "/dev/stderr", target_path);
     symlink("/proc/self/fd/2", target_path);
+
     /// etc
-    get_path_name(sandbox_root_path, "/tmp", target_path);
-    mkdir(target_path, 0777);
+    get_abs_path_name(sandbox_root_path, "/tmp", target_path);
+    mkret = mkdir(target_path, 0777);
+
     /// proc
-    get_path_name(sandbox_root_path, "/proc", target_path);
-    mkdir(target_path, 0700);
-    mount("none", target_path, "proc", 0, "");
+    get_abs_path_name(sandbox_root_path, "/proc", target_path);
+    mkret = mkdir(target_path, 0700);
+    err_report(mkret == -1, "mkdir /proc failure");
+    mount_ret = mount("/proc", target_path, "proc", MS_REC | MS_BIND, "");
+    err_report(mkret == -1, "mkdir /proc failure");
 }
 
 int main(int argc, const char **argv)
@@ -242,7 +270,6 @@ int main(int argc, const char **argv)
         perror("chdir failure");
         exit(1);
     }
-
 
     /*--------------------------------execute the basic command--------------------------------------*/
     char *exec_argv[3 + argc];
