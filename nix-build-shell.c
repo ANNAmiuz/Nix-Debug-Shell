@@ -214,91 +214,97 @@ int main(int argc, const char **argv)
     // namespace setting: user, uts, net
     int uid = getuid();
     int gid = getgid();
-    int ns_ret = unshare(CLONE_NEWUSER | CLONE_NEWUTS | CLONE_NEWNET | CLONE_NEWNS);
-    if (ns_ret != 0)
-    {
-        perror("unshare failure");
-        exit(1);
-    }
+    int ns_ret = unshare(CLONE_NEWUSER | CLONE_NEWUTS | CLONE_NEWNET | CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWIPC);
 
-    /*-------------------------------usernamespace--------------------------------------*/
-    // write deny to setgroups file
-    FILE *setg_fp = fopen("/proc/self/setgroups", "w+");
-    if (setg_fp == NULL)
+    if (fork() == 0)
     {
-        perror("setgroups file open failure");
-        exit(1);
-    }
-    fprintf(setg_fp, "deny");
-    fclose(setg_fp);
+        if (ns_ret != 0)
+        {
+            perror("unshare failure");
+            exit(1);
+        }
 
-    // write to /proc/self/uid_map and /proc/self/gid_map
-    FILE *uid_map_fp = fopen("/proc/self/uid_map", "w+");
-    if (uid_map_fp == NULL)
-    {
-        perror("uid_map file open failure");
-        exit(1);
-    }
-    FILE *gid_map_fp = fopen("/proc/self/gid_map", "w+");
-    if (gid_map_fp == NULL)
-    {
-        perror("gid_map file open failure");
-        exit(1);
-    }
+        /*-------------------------------usernamespace--------------------------------------*/
+        // write deny to setgroups file
+        FILE *setg_fp = fopen("/proc/self/setgroups", "w+");
+        if (setg_fp == NULL)
+        {
+            perror("setgroups file open failure");
+            exit(1);
+        }
+        fprintf(setg_fp, "deny");
+        fclose(setg_fp);
 
-    fprintf(uid_map_fp, "1000 %d 1", uid);
-    fprintf(gid_map_fp, "100 %d 1", gid);
-    fclose(uid_map_fp);
-    fclose(gid_map_fp);
+        // write to /proc/self/uid_map and /proc/self/gid_map
+        FILE *uid_map_fp = fopen("/proc/self/uid_map", "w+");
+        if (uid_map_fp == NULL)
+        {
+            perror("uid_map file open failure");
+            exit(1);
+        }
+        FILE *gid_map_fp = fopen("/proc/self/gid_map", "w+");
+        if (gid_map_fp == NULL)
+        {
+            perror("gid_map file open failure");
+            exit(1);
+        }
 
-    /*--------------------------------utsnamespace--------------------------------------*/
-    char *hostname = "localhost";
-    sethostname(hostname, strlen(hostname));
+        fprintf(uid_map_fp, "1000 %d 1", uid);
+        fprintf(gid_map_fp, "100 %d 1", gid);
+        fclose(uid_map_fp);
+        fclose(gid_map_fp);
 
-    /*--------------------------------netnamespace--------------------------------------*/
-    int fd = (socket(PF_INET, SOCK_DGRAM, IPPROTO_IP));
-    struct ifreq ifr;
-    strcpy(ifr.ifr_name, "lo");
-    ifr.ifr_flags = IFF_UP | IFF_LOOPBACK | IFF_RUNNING;
-    if (ioctl(fd, SIOCSIFFLAGS, &ifr) == -1)
-    {
-        perror("Lo set flag failure");
-        exit(1);
+        /*--------------------------------utsnamespace--------------------------------------*/
+        char *hostname = "localhost";
+        sethostname(hostname, strlen(hostname));
+
+        /*--------------------------------netnamespace--------------------------------------*/
+        int fd = (socket(PF_INET, SOCK_DGRAM, IPPROTO_IP));
+        struct ifreq ifr;
+        strcpy(ifr.ifr_name, "lo");
+        ifr.ifr_flags = IFF_UP | IFF_LOOPBACK | IFF_RUNNING;
+        if (ioctl(fd, SIOCSIFFLAGS, &ifr) == -1)
+        {
+            perror("Lo set flag failure");
+            exit(1);
+        }
+
+        /*--------------------------------mountnamespace--------------------------------------*/
+        // create tmp dir for sandbox env
+        char name[] = "/tmp/sandboxXXXXXX";
+        char *sandbox_root_path = mkdtemp(name);
+        if (sandbox_root_path == NULL)
+        {
+            perror("mkdtemp failure");
+            exit(1);
+        }
+        mountns_prepare(sandbox_root_path, shell_path, build_dir);
+        int chr_ret = chroot(sandbox_root_path);
+        if (chr_ret == -1)
+        {
+            perror("chroot failure");
+            exit(1);
+        }
+        int ch_dir_ret = chdir("/");
+        if (ch_dir_ret == -1)
+        {
+            perror("chdir failure");
+            exit(1);
+        }
+
+        /*--------------------------------execute the basic command--------------------------------------*/
+        char *exec_argv[3 + argc];
+        exec_argv[0] = shell_path;
+        exec_argv[1] = "-c";
+        // exec_argv[2] = "source /tmp/nix-build-hello.drv-3/env-vars; exec \"$@\""; // change to /build/env-vars after successful setup mountns
+        exec_argv[2] = "source /build/env-vars; exec \"$@\"";
+        exec_argv[3] = "--";
+        for (int i = 0; i < argc - 2; i++)
+            exec_argv[4 + i] = argv[2 + i];
+        exec_argv[2 + argc] = (char *)0;
+
+        execv(shell_path, exec_argv);
     }
-
-    /*--------------------------------mountnamespace--------------------------------------*/
-    // create tmp dir for sandbox env
-    char name[] = "/tmp/sandboxXXXXXX";
-    char *sandbox_root_path = mkdtemp(name);
-    if (sandbox_root_path == NULL)
-    {
-        perror("mkdtemp failure");
-        exit(1);
-    }
-    mountns_prepare(sandbox_root_path, shell_path, build_dir);
-    int chr_ret = chroot(sandbox_root_path);
-    if (chr_ret == -1)
-    {
-        perror("chroot failure");
-        exit(1);
-    }
-    int ch_dir_ret = chdir("/");
-    if (ch_dir_ret == -1)
-    {
-        perror("chdir failure");
-        exit(1);
-    }
-
-    /*--------------------------------execute the basic command--------------------------------------*/
-    char *exec_argv[3 + argc];
-    exec_argv[0] = shell_path;
-    exec_argv[1] = "-c";
-    // exec_argv[2] = "source /tmp/nix-build-hello.drv-3/env-vars; exec \"$@\""; // change to /build/env-vars after successful setup mountns
-    exec_argv[2] = "source /build/env-vars; exec \"$@\"";
-    exec_argv[3] = "--";
-    for (int i = 0; i < argc - 2; i++)
-        exec_argv[4 + i] = argv[2 + i];
-    exec_argv[2 + argc] = (char *)0;
-
-    execv(shell_path, exec_argv);
+    else 
+        waitpid(-1, 0, 0);
 }
