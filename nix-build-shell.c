@@ -175,7 +175,8 @@ void mountns_prepare(const char *sandbox_root_path, const char *shell_path, cons
 
     /// tmp
     get_abs_path_name(sandbox_root_path, "/tmp", target_path);
-    mkret = mkdir(target_path, 0777);
+    mkret = mkdir(target_path, 01777);
+    chmod(target_path, 01777);
 
     /// proc
     get_abs_path_name(sandbox_root_path, "/proc", target_path);
