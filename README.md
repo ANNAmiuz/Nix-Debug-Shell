@@ -1,5 +1,6 @@
-# Containers
+# Containers: Build a Sandbox Shell for Nix Failure Debugging
 
+## References
 General introduction to containers/namespaces/cgroups (40min): https://www.youtube.com/watch?v=GMs3kLteZvk
 Slides: https://github.com/ls1-sys-prog-course/docs/blob/main/slides/08-container.pdf
 Assignment explained (10min): https://www.youtube.com/watch?v=INyb4Rj073U
