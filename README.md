@@ -34,7 +34,7 @@ The concrete sandbox environment might look different depending on the operating
 system (i.e. MacOS vs. Linux). For this assignment you only need to implement
 the Linux part. The first part of [this
 talk](https://www.youtube.com/watch?v=ULqoCjANK-I) explains in depth what this
-environment looks like, however this is not compulsory viewing to complete the task.
+environment looks like, however this is not compulsory viewing to complete the project.
 
 ### Motivation: lacking debuggability of nix builds
 
@@ -322,9 +322,9 @@ Additionally this task requires unprivileged username spaces to be enabled.
 This may not be enabled in all Linux distributions by default. One can enable it using
 [this guide](https://github.com/nix-community/nix-user-chroot#check-if-your-kernel-supports-user-namespaces-for-unprivileged-users).
 
-# The task
+# The Project
 
-Your task is to write a `nix-build-shell` that takes the above build directory of
+This project is to build a `nix-build-shell` that takes the above build directory of
 a failed build as the first argument of the build directory followed by
 the commands with its argument that should be run in the build sandbox. The
 sandbox should be as close as possible to the sandbox environment that Nix
